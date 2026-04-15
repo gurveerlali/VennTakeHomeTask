@@ -6,6 +6,7 @@ import org.venn.takeHomeTest.transactions.dto.LoadResponse;
 import org.venn.takeHomeTest.repository.TransactionRepository;
 import org.venn.takeHomeTest.repository.entity.Transaction;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
@@ -27,11 +28,11 @@ public class TransactionService {
     public TransactionService(TransactionRepository transactionRepository) {
         this.transactionRepository = transactionRepository;
     }
-
-    /**
-     * Process a load attempt. Returns null if the load ID is a duplicate for this customer.
-     */
+    
+    @Transactional
     public LoadResponse postLoad(LoadRequest request) {
+        validateRequest(request);
+
         String loadId = request.getId();
         String customerId = request.getCustomerId();
 
@@ -62,6 +63,14 @@ public class TransactionService {
                 && dailyTotal.add(amount).compareTo(DAILY_AMOUNT_LIMIT) <= 0
                 && weeklyTotal.add(amount).compareTo(WEEKLY_AMOUNT_LIMIT) <= 0;
 
+        if (!accepted) {
+            StringBuilder reason = new StringBuilder("Declined: ");
+            if (dailyCount >= DAILY_LOAD_LIMIT) reason.append("daily load count exceeded; ");
+            if (dailyTotal.add(amount).compareTo(DAILY_AMOUNT_LIMIT) > 0) reason.append("daily amount limit exceeded; ");
+            if (weeklyTotal.add(amount).compareTo(WEEKLY_AMOUNT_LIMIT) > 0) reason.append("weekly amount limit exceeded; ");
+            log.info("Load {} for customer {}: {}", loadId, customerId, reason);
+        }
+
         // Persist the attempt in order to track for duplicates
         Transaction transaction = new Transaction();
         transaction.setLoadId(loadId);
@@ -80,5 +89,25 @@ public class TransactionService {
         log.debug("Load {} for customer {}: accepted={} (dailyCount={}, dailyTotal={}, weeklyTotal={})",
                 loadId, customerId, accepted, dailyCount, dailyTotal, weeklyTotal);
         return response;
+    }
+
+    private void validateRequest(LoadRequest request) {
+        if (request.getId() == null || request.getId().isBlank()) {
+            throw new InvalidLoadRequestException("Load request id is required");
+        }
+        if (request.getCustomerId() == null || request.getCustomerId().isBlank()) {
+            throw new InvalidLoadRequestException("Customer id is required");
+        }
+        if (request.getLoadAmount() == null || !request.getLoadAmount().matches("^\\$\\d+(\\.\\d{1,2})?$")) {
+            throw new InvalidLoadRequestException("Load amount must be in format $X.XX, got: " + request.getLoadAmount());
+        }
+        if (request.getTime() == null || request.getTime().isBlank()) {
+            throw new InvalidLoadRequestException("Time is required");
+        }
+        try {
+            Instant.parse(request.getTime());
+        } catch (Exception e) {
+            throw new InvalidLoadRequestException("Invalid time format: " + request.getTime());
+        }
     }
 }
