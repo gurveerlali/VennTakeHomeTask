@@ -15,8 +15,7 @@ public class Main {
             SpringApplication app = new SpringApplication(Main.class);
             app.run(args);
         } catch (Exception e) {
-            e.printStackTrace();
-            log.error("SpringApplication Error: {}", e.toString());
+            log.error("Application failed to start", e);
         }
     }
 }
